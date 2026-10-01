@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect, Layer, Context, Schema } from "effect"
+import { isDeepStrictEqual } from "node:util"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Snapshot } from "@/snapshot"
@@ -122,6 +123,12 @@ const layer = Layer.effect(
       const target = messages.find((m) => m.info.id === input.messageID)
       if (!target || target.info.role !== "user") return
       const msgDiffs = yield* computeDiff({ messages })
+      // `summarize` runs after every step, but the diff for a turn is recomputed from
+      // the same snapshots each time and is usually unchanged. Publishing it anyway
+      // appends a full copy of the (cumulative, ever-growing) diff to the append-only
+      // event log on every step, which grows quadratically with turn length. The
+      // projector upserts message rows, so skipping an identical summary is a no-op.
+      if (isDeepStrictEqual(target.info.summary?.diffs, msgDiffs)) return
       target.info.summary = { ...target.info.summary, diffs: msgDiffs }
       yield* sessions.updateMessage(target.info)
     })
